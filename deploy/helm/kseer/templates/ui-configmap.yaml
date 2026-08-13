@@ -1,0 +1,108 @@
+{{- if .Values.ui.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kseer.ui.fullname" . }}
+  labels:
+    {{- include "kseer.labels" (dict "root" $ "component" "ui" "values" .Values.ui "kind" "deployment") | nindent 4 }}
+data:
+  {{/*
+    The UI is a static bundle, so everything environment-specific is injected at
+    runtime: index.html loads /env-config.js before the app boots, and the app
+    reads window.env with import.meta.env as the local-dev fallback. Changing a
+    value here and rolling the Deployment is enough — no rebuild.
+  */}}
+  env-config.js: |
+    window.env = {
+      CLICKHOUSE_DATABASE: "{{ .Values.ui.clickhouse.database }}",
+      CLICKHOUSE_TABLE: "{{ .Values.ui.clickhouse.table }}",
+      AZURE_ENABLED: "{{ .Values.ui.azure.enabled }}",
+      AZURE_TENANT_ID: "{{ .Values.ui.azure.tenantId }}",
+      AZURE_CLIENT_ID: "{{ .Values.ui.azure.clientId }}",
+      AZURE_PROXY_CLIENT_ID: "{{ .Values.ui.azure.proxyClientId }}",
+      AZURE_USE_ID_TOKEN: "{{ .Values.ui.azure.useIdToken }}"
+    };
+  {{/*
+    Replaces the image's nginx.conf. Two differences that matter: it listens on
+    an unprivileged port and keeps all writable paths under /tmp so the pod can
+    run as a non-root user, and /clickhouse proxies to the endpoint this release
+    is configured with instead of a baked-in host.
+  */}}
+  nginx.conf: |
+    pid /tmp/nginx.pid;
+
+    events {
+        worker_connections 1024;
+    }
+
+    http {
+        include /etc/nginx/mime.types;
+        default_type application/octet-stream;
+
+        client_body_temp_path /tmp/client_body;
+        proxy_temp_path /tmp/proxy_temp;
+        fastcgi_temp_path /tmp/fastcgi_temp;
+        uwsgi_temp_path /tmp/uwsgi_temp;
+        scgi_temp_path /tmp/scgi_temp;
+
+        server {
+            listen {{ .Values.ui.container.containerPort }};
+            server_name _;
+            root /usr/share/nginx/html;
+            index index.html;
+
+            gzip on;
+            gzip_vary on;
+            gzip_min_length 1024;
+            gzip_types text/plain text/css text/xml text/javascript application/javascript application/json application/xml+rss;
+
+            # Runtime config must never be cached, or a config change would not
+            # reach browsers that already have the old file.
+            location = /env-config.js {
+                add_header Cache-Control "no-cache, no-store, must-revalidate";
+                expires 0;
+            }
+
+            location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+                expires 1y;
+                add_header Cache-Control "public, immutable";
+            }
+
+            # Single-page app: every unknown path renders the shell.
+            location / {
+                try_files $uri $uri/ /index.html;
+                add_header Cache-Control "no-cache";
+            }
+
+            location /health {
+                access_log off;
+                return 200 "healthy\n";
+                add_header Content-Type text/plain;
+            }
+
+            # Queries from the browser land here and are forwarded to ClickHouse.
+            # The browser's Authorization header (Basic, or Bearer when an authz
+            # proxy fronts ClickHouse) is passed through untouched.
+            location /clickhouse {
+                if ($request_method !~ ^(GET|POST|OPTIONS)$) {
+                    return 405;
+                }
+
+                rewrite ^/clickhouse(.*) /$1 break;
+                proxy_pass {{ include "kseer.ui.proxyUrl" . }};
+                {{- if not .Values.ui.clickhouse.sslVerify }}
+                proxy_ssl_verify off;
+                {{- end }}
+                proxy_set_header Host $proxy_host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                # Streaming both ways keeps large result sets off disk.
+                proxy_buffering off;
+                proxy_request_buffering off;
+                proxy_read_timeout {{ .Values.ui.clickhouse.proxyReadTimeout }};
+                client_max_body_size {{ .Values.ui.clickhouse.maxQuerySize }};
+            }
+        }
+    }
+{{- end }}

@@ -1,0 +1,11 @@
+{{- if .Values.rbac.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ default (include "kseer-agent.fullname" .) .Values.rbac.clusterRoleName }}
+  labels:
+    {{- include "kseer-agent.labels" . | nindent 4 }}
+rules:
+{{- toYaml .Values.rbac.rules | nindent 2 }}
+{{- end }}
+

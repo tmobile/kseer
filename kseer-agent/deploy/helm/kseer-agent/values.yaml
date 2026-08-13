@@ -1,0 +1,329 @@
+# Default values for kseer-agent
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# Deployment mode: "in-cluster" (agent runs as a Deployment with projected SA token)
+# or "multi-cluster" (RBAC + SA-token Secret only, for external readers pulling the
+# token from Vault). In multi-cluster mode, Deployment/ConfigMap/output settings are
+# ignored.
+mode: in-cluster
+
+# in-cluster only: controls whether the chart renders a Namespace resource for
+# its workloads. See README "Namespace behavior" for the two install patterns.
+#
+# Default: false. Use `helm install -n <ns> --create-namespace` — simpler, but
+# `helm uninstall` leaves the namespace behind.
+#
+# Set to true AND install with `-n <some-other-existing-ns>` (not --create-namespace)
+# if you want `helm uninstall` to cascade-delete the namespace too. The chart's
+# Namespace template then becomes a Helm-managed resource. Alternatively, pair
+# `create: true` with `helm install --create-namespace --take-ownership` on Helm
+# ≥ 3.17. Multi-cluster mode ignores this block entirely.
+namespace:
+  create: false
+  # Namespace name. If empty, defaults to the chart fullname (e.g. "kseer-agent").
+  # Only used when create=true.
+  name: ""
+
+# Image configuration
+image:
+  repository: registry.example.com/kseer/kseer-agent
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Service account configuration
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+# RBAC configuration
+rbac:
+  # Specifies whether RBAC resources should be created
+  create: true
+  # Optional ClusterRole name override (empty = derive from fullname template)
+  clusterRoleName: ""
+  # Optional ClusterRoleBinding name override (empty = derive from fullname template)
+  clusterRoleBindingName: ""
+  # ClusterRole rules - defines what resources the agent can watch
+  rules:
+    - apiGroups: [ "*" ]
+      resources: [ "*" ]
+      verbs: [ "get", "list", "watch" ]
+
+# FlowSchema (API priority & fairness) - protects API server from get/list/watch load
+flowSchema:
+  enabled: true
+  # Optional name override (empty = derive from fullname template)
+  name: ""
+  # Set true to use flowcontrol.apiserver.k8s.io/v1beta2 (legacy, k8s <1.29).
+  # Default false uses flowcontrol.apiserver.k8s.io/v1 (k8s 1.29+).
+  legacy: false
+  matchingPrecedence: 2000
+  priorityLevel: workload-low
+
+# multi-cluster only: renders an SA-token Secret so an external reader (via Vault)
+# can authenticate. The suffix alternates between "a" and "b" for blue/green token
+# rotation driven from the Terraform module.
+tokenSecret:
+  suffix: a
+
+# in-cluster only: renders a namespaced SecretStore + ExternalSecret (ESO) that
+# pulls ClickHouse credentials from Vault into a K8s Secret. This is path (A)
+# in outputs.clickhouse.credentialsSecret — see that section for alternatives.
+# When enabled, credentialsSecret.create MUST be false (Helm will not create a
+# static Secret; ESO creates it). The chart validates this at render time.
+externalSecret:
+  # Off by default. Turn on via a values file (see values-examples/) when you
+  # want ESO to pull ClickHouse credentials from Vault for you.
+  enabled: false
+  # Vault server URL (e.g. https://vault.example.com). Required when enabled.
+  vaultServer: ""
+  # KV v2 mount name in Vault.
+  vaultMount: ""
+  # Path under the mount to read credentials from. The Secret in Vault must
+  # have keys `username` and `password`.
+  vaultPath: ""
+  # Vault K8s-auth role that binds the agent ServiceAccount to a read policy
+  # for vaultPath. Required when enabled.
+  vaultRole: ""
+  # Path of the cluster's Kubernetes auth backend mount in Vault
+  # (e.g. "kubernetes-prd-aws-k8s-foo-001"). Required when enabled.
+  vaultAuthMountPath: ""
+  # Optional SecretStore name override (empty = derive from fullname template).
+  secretStoreName: ""
+  # How often ESO re-syncs from Vault.
+  refreshInterval: "1h"
+
+# Pod configuration
+podAnnotations: {}
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  fsGroup: 65534
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+
+# Resource limits and requests
+resources:
+  limits:
+    cpu: 2
+    memory: 8Gi
+  requests:
+    cpu: 500m
+    memory: 1Gi
+
+# Node selection
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Cluster configuration
+cluster:
+  # Name of the cluster being monitored (stored in ClickHouse `cluster_name`).
+  # MUST be set per install (e.g. via --set cluster.name=...). Empty default
+  # triggers a "local-cluster" fallback in the agent — fine for one-off tests
+  # but not what you want in production.
+  name: ""
+  # Namespaces to watch - empty list watches all namespaces
+  namespaces: []
+  # Resources to watch - empty list watches all resources
+  # Example:
+  # resources:
+  #   - apiVersion: "v1"
+  #     kind: "Pod"
+  #   - apiVersion: "apps/v1"
+  #     kind: "Deployment"
+  resources: []
+
+# Output configuration
+outputs:
+  # ClickHouse output (primary output for centralized event storage).
+  # host/database/table are environment-specific — set them in your values
+  # file (see values-examples/internal-container-platform.yaml for a
+  # centralized container-platform setup).
+  clickhouse:
+    enabled: true
+    host: ""
+    port: 9000
+    database: ""
+    table: ""
+    # events_table for resume RV queries on restart (optional). Set to your
+    # main events table name to skip initial LIST for already-seeded kinds.
+    eventsTable: ""
+    tls: false
+    tlsSkipVerify: false
+    batchSize: 1000
+    tableVersion: "object_json"
+    # ClickHouse credentials - choose exactly ONE of these paths:
+    #
+    #   (A) ESO syncs credentials from Vault (recommended when ESO is available):
+    #       externalSecret.enabled: true
+    #       credentialsSecret.create: false
+    #       credentialsSecret.name: ""  # defaults to <release>-clickhouse
+    #
+    #   (B) Helm creates the Secret from username/password below:
+    #       credentialsSecret.create: true
+    #       username: "<username>"
+    #       password: "<password>"
+    #
+    #   (C) Reference a pre-existing Secret (created out-of-band):
+    #       credentialsSecret.create: false
+    #       credentialsSecret.name: "my-existing-secret"
+    #
+    # Regardless of path, the Secret must have "username" and "password" keys.
+    username: ""
+    password: ""
+    credentialsSecret:
+      # (B) Helm creates the Secret from username/password above
+      create: false
+      # (A)/(C) Name of the Secret to reference (ESO target or pre-existing).
+      # If empty, defaults to "<release>-clickhouse".
+      name: ""
+
+  # Kafka output
+  kafka:
+    enabled: false
+    brokers:
+      - "kafka:9092"
+    topic: "kubernetes-events"
+    compression: "snappy"
+    # Additional Kafka configuration
+    config: {}
+
+  # Stdout output (for debugging)
+  stdout:
+    enabled: false
+    pretty: false
+
+# Buffer configuration
+buffer:
+  # Buffer size (number of events to queue before blocking)
+  size: 500000
+  # How often to flush batched events to outputs
+  flushInterval: "5s"
+  # Retry interval for failed sends
+  retryInterval: "30s"
+  # Events per batch to outputs
+  batchSize: 25000
+
+# Concurrency control
+concurrencyControl:
+  enabled: true
+  # Maximum concurrent LIST operations across all clusters (global semaphore)
+  maxGlobalLists: 30
+  # Maximum concurrent LIST operations per cluster
+  maxListsPerCluster: 10
+  # Maximum concurrent cluster initializations
+  maxClusterInits: 5
+
+# Default watch configuration
+watchConfig:
+  initialBackoff: "1s"
+  maxBackoff: "5m"
+  # Watch timeout - how long before API server closes connection (5 days)
+  timeoutSeconds: 432000
+  allowBookmarks: true
+  listPageSize: 500
+  # Periodic full re-LIST interval. 0 disables (default).
+  # When set, each resource type is re-LISTed at this interval, sending all
+  # current objects as EXISTING events.
+  resyncInterval: "0"
+
+  # Retry policy for ClickHouse seeder queries at watcher startup. These
+  # queries (resume RVs, seed completion, last-seed timestamps) anchor
+  # P1/P2/P3 resync schedules across pod restarts; transient CH
+  # unavailability (cold connection, brief outage) shouldn't force the
+  # agent to fall back to a fresh full LIST or now+interval scheduling.
+  # Total worst-case wait: backoff + 2*backoff = 6s with defaults.
+  seederQueryRetries: 2
+  seederQueryBackoff: "2s"
+
+  # Priority tiers assign per-kind sync strategies on top of the legacy
+  # LIST+WATCH path. Kinds not listed default to P2 (the legacy behavior plus
+  # optional resyncInterval above).
+  #
+  # P1: LIST+WATCH plus a sequential resync loop that re-LISTs each P1 kind
+  #     and waits for events to flush before listing the next kind. P1 LISTs
+  #     are non-paginated; use only for low-cardinality kinds (Namespace,
+  #     Node, NetworkPolicy, ResourceQuota, CRDs).
+  # P3: no WATCH; periodic LIST. The agent does not emit DELETED events for
+  #     P3 kinds — clients determine "live" objects by filtering events to
+  #     within the most recent relistInterval window.
+  # P4: WATCH-only from the current point in time — no initial LIST, no
+  #     relist, no seeding. Streams changes forward from when the watch
+  #     opens. Ideal for ephemeral, high-volume, stream-shaped kinds like
+  #     Event where backfilling existing state is pointless.
+  # P5: ignored entirely — no LIST, no WATCH, no relist. Useful for
+  #     high-volume, low-value kinds you don't want in CH.
+  tiers:
+    p1:
+      # Default cadence for P1 kinds; required when p1.kinds is non-empty.
+      resyncInterval: "12h"
+      kinds:
+        - kind: Namespace
+          resyncInterval: "5h"
+        - kind: Role
+        - kind: RoleBinding
+        - kind: ClusterRole
+        - kind: ClusterRoleBinding
+        - kind: ConfigMap
+        - kind: DuckCluster
+        - kind: Deployment
+      # Example:
+      # kinds:
+      #   - kind: Namespace
+      #     resyncInterval: "5h"   # per-kind override
+      #   - kind: Node
+      #   - kind: NetworkPolicy
+    p3:
+      # Default cadence for P3 kinds; required when p3.kinds is non-empty.
+      relistInterval: "120h"
+      kinds:
+        - kind: HorizontalPodAutoscaler
+      # Example:
+      # kinds:
+      #   - kind: HorizontalPodAutoscaler
+      #   - kind: BigCustomResource
+      #     apiVersion: foo.example.com/v1   # optional disambiguation
+      #     relistInterval: "6h"
+    p4:
+      # WATCH-only from now: no LIST, no relist, no seed. Optional `apiVersion`
+      # disambiguates if a Kind exists in multiple groups.
+      kinds:
+        - kind: Event
+      # Example:
+      # kinds:
+      #   - kind: Event
+      #   - kind: SomeNoisyStreamCRD
+      #     apiVersion: foo.example.com/v1
+    p5:
+      # Ignored entirely. Optional `apiVersion` disambiguates if a Kind exists
+      # in multiple groups.
+      kinds:
+        - kind: AuthRequest
+        - kind: Lease
+      # Example:
+      # kinds:
+      #   - kind: Lease
+      #   - kind: SomeNoisyCRD
+      #     apiVersion: foo.example.com/v1
+
+# Logging configuration
+logging:
+  # Log level: debug, info, warn, error
+  level: info

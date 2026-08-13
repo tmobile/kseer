@@ -1,0 +1,32 @@
+# Configuration for "external" consumers of a cluster — KSeer readers running
+# outside the cluster authenticate via a ServiceAccount token stored in Vault.
+# In this mode the chart only deploys the RBAC + FlowSchema + SA-token Secret.
+# Deployment, ConfigMap, and output (ClickHouse/Kafka/stdout) settings are
+# ignored.
+#
+# A companion automation (e.g. a Terraform module) reads the generated Secret's
+# token and publishes it to Vault.
+
+mode: multi-cluster
+
+cluster:
+  name: "cluster-name-here"  # Set to actual cluster name
+
+# Pinned names so external consumers can reference deterministically.
+serviceAccount:
+  name: svc-kseer-cluster-read
+
+rbac:
+  clusterRoleName: kseer-cluster-read
+  clusterRoleBindingName: kseer-cluster-read-crb
+
+flowSchema:
+  enabled: true
+  name: kseer-cluster-reader
+  matchingPrecedence: 2000
+  priorityLevel: workload-low
+
+# tokenSecret.suffix alternates between "a" and "b" for blue/green token
+# rotation. The Terraform module drives this value.
+tokenSecret:
+  suffix: a

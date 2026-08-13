@@ -1,0 +1,111 @@
+# Kseer Agent Configuration - Multi-Cluster Mode
+# This example shows how to configure the agent to watch multiple Kubernetes clusters
+
+# Deployment mode - use "multi-cluster" for external deployments
+mode: multi-cluster
+
+# Multiple Kubernetes clusters configuration
+clusters:
+  # Production cluster in US West region
+  - name: "prod-us-west"
+    kubeconfig: "/path/to/kubeconfigs/prod-us-west.yaml"
+    context: "prod-west-context"
+    # Watch specific namespaces (empty list = all namespaces)
+    namespaces:
+      - production
+      - api-services
+      - data-services
+    # Watch specific resources (empty list = all resources)
+    resources:
+      - apiVersion: "v1"
+        kind: "Pod"
+      - apiVersion: "v1"
+        kind: "Service"
+      - apiVersion: "apps/v1"
+        kind: "Deployment"
+      - apiVersion: "apps/v1"
+        kind: "StatefulSet"
+    # Per-cluster watch overrides. resync_interval must live under
+    # watch_config - a top-level resync_interval on a cluster is ignored.
+    # Every resync is a full LIST against the API server.
+    watch_config:
+      resync_interval: "5m"
+
+  # Production cluster in US East region
+  - name: "prod-us-east"
+    kubeconfig: "/path/to/kubeconfigs/prod-us-east.yaml"
+    context: "prod-east-context"
+    namespaces:
+      - production
+      - api-services
+    resources:
+      - apiVersion: "v1"
+        kind: "Pod"
+      - apiVersion: "apps/v1"
+        kind: "Deployment"
+    watch_config:
+      resync_interval: "5m"
+
+  # Staging cluster - watch everything
+  - name: "staging"
+    kubeconfig: "/path/to/kubeconfigs/staging.yaml"
+    context: ""  # Use default context from kubeconfig
+    namespaces: []  # Watch all namespaces
+    resources: []   # Watch all resources
+    watch_config:
+      resync_interval: "10m"
+
+  # Development cluster
+  - name: "development"
+    kubeconfig: "/path/to/kubeconfigs/dev.yaml"
+    context: ""
+    namespaces:
+      - default
+      - dev-team-a
+      - dev-team-b
+    resources: []
+    watch_config:
+      resync_interval: "15m"
+
+# Output destinations
+outputs:
+  # Kafka output - primary event stream
+  - type: kafka
+    config:
+      brokers:
+        - "kafka-1.example.com:9092"
+        - "kafka-2.example.com:9092"
+        - "kafka-3.example.com:9092"
+      topic: "kubernetes-events"
+      compression: "snappy"
+      # Optional: SASL authentication
+      # sasl:
+      #   mechanism: "SCRAM-SHA-512"
+      #   username: "kseer-agent"
+      #   password: "your-secure-password"
+      # Optional: TLS configuration
+      # tls:
+      #   enabled: true
+      #   insecureSkipVerify: false
+      #   certFile: "/path/to/client-cert.pem"
+      #   keyFile: "/path/to/client-key.pem"
+      #   caFile: "/path/to/ca-cert.pem"
+
+  # Stdout output - useful for debugging
+  - type: stdout
+    config:
+      # Pretty print JSON for readability
+      pretty: false
+
+# Local buffering configuration
+buffer:
+  # Buffer size (number of events to queue before blocking)
+  # Increase for high-volume clusters
+  size: 10000
+  
+  # How often to flush batched events to outputs
+  flush_interval: "5s"
+  
+  # Retry interval for failed sends
+  retry_interval: "30s"
+

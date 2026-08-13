@@ -1,0 +1,76 @@
+# Configuration for a centralized "container platform" use case —
+# kseer-agent running in-cluster, watching the cluster it lives in, and
+# sending events to a centralized ClickHouse via Vault-managed credentials
+# delivered through ExternalSecrets Operator (ESO).
+#
+# Prerequisites in the target cluster:
+#   - ESO controller installed and reachable
+#   - Vault Kubernetes auth backend configured for this cluster (see
+#     externalSecret.vaultAuthMountPath below)
+#   - Image pull access to your container registry
+#
+# Required overrides at install time:
+#   --set cluster.name=<actual-cluster-name>
+#   --set externalSecret.vaultAuthMountPath=<cluster-specific-mount>
+#
+# Example install:
+#   helm install kseer-agent ./kseer-agent \
+#     -n kseer-agent --create-namespace \
+#     -f values-examples/internal-container-platform.yaml \
+#     --set cluster.name=prd-cloud-k8s-foo-001 \
+#     --set externalSecret.vaultAuthMountPath=kubernetes-prd-cloud-k8s-foo-001
+
+mode: in-cluster
+
+image:
+  repository: registry.example.com/kseer/kseer-agent
+  pullPolicy: IfNotPresent
+  # tag: ""  # defaults to chart appVersion; pin if needed
+
+cluster:
+  # MUST be set per cluster (e.g. via --set cluster.name=...). This is the
+  # value the agent stores in ClickHouse's `cluster_name` column for every
+  # event from this cluster.
+  name: ""
+  namespaces: []
+  resources: []
+
+# ClickHouse credentials path A: ESO syncs from Vault.
+externalSecret:
+  enabled: true
+  vaultServer: https://vault.example.com/
+  vaultMount: "kv"
+  vaultPath: "kseer/clickhouse_credentials/read-write"
+  vaultRole: "kseer-clickhouse-reader"
+  # Per-cluster Vault Kubernetes-auth backend mount. The Vault admin registers
+  # each cluster with its own mount so the SA tokens can be validated.
+  # Example: "kubernetes-prd-aws-k8s-foo-001"
+  vaultAuthMountPath: ""
+  refreshInterval: "1h"
+
+outputs:
+  clickhouse:
+    enabled: true
+    host: "clickhouse.example.com"
+    port: 9000
+    database: "container_platform_database"
+    table: "kubernetes_events"
+    # events_table for resume-RV queries on agent restart (skip initial LIST
+    # for kinds that have already been seeded).
+    eventsTable: "kubernetes_events"
+    tls: false
+    tlsSkipVerify: false
+    batchSize: 1000
+    tableVersion: "object_json"
+    # Per-event INFO log (kind/namespace/name/uid/rv). Off by default — noisy
+    # at production volume. Flip on for short debugging windows.
+    verboseEventLogging: false
+    # ESO will create this Secret; do NOT have Helm create one too (the chart's
+    # _validations.tpl enforces this). Empty `name` defaults to <release>-clickhouse.
+    credentialsSecret:
+      create: false
+      name: ""
+  kafka:
+    enabled: false
+  stdout:
+    enabled: false

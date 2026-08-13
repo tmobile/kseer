@@ -1,0 +1,93 @@
+:root {
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+#root {
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Custom scrollbar for dark theme */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1e1e1e;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #555;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #777;
+}
+
+/* D3 Graph Styles */
+.node {
+  cursor: pointer;
+}
+
+.node:hover {
+  filter: brightness(1.2);
+}
+
+.link {
+  fill: none;
+  stroke: #999;
+  stroke-opacity: 0.6;
+}
+
+.link:hover {
+  stroke-opacity: 1;
+  stroke-width: 3px;
+}
+
+/* Prevent text selection on graph */
+svg {
+  user-select: none;
+}
+
+/* Animation for new nodes */
+@keyframes nodeAppear {
+  from {
+    opacity: 0;
+    transform: scale(0);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.node-new {
+  animation: nodeAppear 0.3s ease-out;
+}
+
+/* Animation for deleted nodes */
+@keyframes nodeDelete {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.3;
+  }
+}
+
+.node-deleted {
+  animation: nodeDelete 0.3s ease-out;
+  animation-fill-mode: forwards;
+}

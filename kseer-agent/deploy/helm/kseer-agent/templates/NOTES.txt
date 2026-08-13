@@ -1,0 +1,39 @@
+Thank you for installing {{ .Chart.Name }}!
+
+Your release is named {{ .Release.Name }}.
+
+The kseer-agent is now running in IN-CLUSTER mode and will watch resources in this cluster.
+
+Configuration:
+  - Cluster Name: {{ .Values.cluster.name }}
+  - Mode: {{ .Values.mode }}
+  {{- if .Values.cluster.namespaces }}
+  - Watching Namespaces: {{ join ", " .Values.cluster.namespaces }}
+  {{- else }}
+  - Watching Namespaces: All
+  {{- end }}
+  {{- if .Values.cluster.resources }}
+  - Watching Resources: Filtered
+  {{- else }}
+  - Watching Resources: All
+  {{- end }}
+
+Output Configuration:
+  {{- if .Values.outputs.clickhouse.enabled }}
+  - ClickHouse: Enabled ({{ .Values.outputs.clickhouse.host }}:{{ .Values.outputs.clickhouse.port }})
+  {{- end }}
+  {{- if .Values.outputs.kafka.enabled }}
+  - Kafka: Enabled ({{ join ", " .Values.outputs.kafka.brokers }})
+  {{- end }}
+  {{- if .Values.outputs.stdout.enabled }}
+  - Stdout: Enabled
+  {{- end }}
+
+To view the logs:
+  kubectl logs -f deployment/{{ include "kseer-agent.fullname" . }} -n {{ .Release.Namespace }}
+
+To check the status:
+  kubectl get deployment {{ include "kseer-agent.fullname" . }} -n {{ .Release.Namespace }}
+
+To upgrade the configuration:
+  helm upgrade {{ .Release.Name }} kseer-agent -n {{ .Release.Namespace }} -f your-values.yaml

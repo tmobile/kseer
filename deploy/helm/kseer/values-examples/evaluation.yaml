@@ -1,0 +1,75 @@
+# Everything in one release: bundled ClickHouse, schema, agent, and UI.
+#
+# For kicking the tyres on a scratch cluster. The bundled ClickHouse has no
+# replication and no backups — see values.yaml.
+#
+# Assumes the release is named "kseer", because the agent has to be told the
+# ClickHouse service name and Helm cannot compute it for a subchart. If you
+# name the release something else, replace "kseer-" in the two places below.
+#
+#   helm install kseer ./deploy/helm/kseer \
+#     -n kseer --create-namespace \
+#     -f ./deploy/helm/kseer/values-examples/evaluation.yaml \
+#     --set clickhouse.auth.password=<pick-one> \
+#     --set agent.cluster.name=<this-cluster>
+
+clickhouse:
+  enabled: true
+  # Small enough for a laptop-sized cluster.
+  persistence:
+    size: 10Gi
+  settings:
+    maxMemoryUsage: 2000000000
+    maxThreads: 2
+  resources:
+    limits:
+      cpu: 2
+      memory: 3Gi
+    requests:
+      cpu: 250m
+      memory: 1Gi
+  auth:
+    username: kseer
+    # Pass with --set clickhouse.auth.password=... instead of committing one.
+    password: ""
+
+schema:
+  enabled: true
+  mode: single
+  database: kseer
+
+agent:
+  enabled: true
+  cluster:
+    name: ""
+  image:
+    repository: registry.example.com/kseer/kseer-agent
+    tag: ""
+  outputs:
+    clickhouse:
+      enabled: true
+      host: kseer-clickhouse
+      port: 9000
+      database: kseer
+      table: kubernetes_events
+      eventsTable: kubernetes_events
+      # Reuse the Secret the bundled ClickHouse already created.
+      credentialsSecret:
+        create: false
+        name: kseer-clickhouse
+  # Flush often so events show up in the UI quickly. Production installs
+  # should batch far more aggressively.
+  buffer:
+    flushInterval: "5s"
+    batchSize: 1000
+
+ui:
+  enabled: true
+  image:
+    repository: registry.example.com/kseer/kseer-object-history
+    tag: ""
+  clickhouse:
+    # Empty means the bundled ClickHouse.
+    url: ""
+    database: kseer
+    table: kubernetes_events

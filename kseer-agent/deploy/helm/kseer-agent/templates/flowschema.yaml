@@ -1,0 +1,25 @@
+{{- if .Values.flowSchema.enabled -}}
+apiVersion: flowcontrol.apiserver.k8s.io/{{ if .Values.flowSchema.legacy }}v1beta2{{ else }}v1{{ end }}
+kind: FlowSchema
+metadata:
+  name: {{ default (include "kseer-agent.fullname" .) .Values.flowSchema.name }}
+  labels:
+    {{- include "kseer-agent.labels" . | nindent 4 }}
+spec:
+  matchingPrecedence: {{ .Values.flowSchema.matchingPrecedence }}
+  distinguisherMethod:
+    type: ByUser
+  priorityLevelConfiguration:
+    name: {{ .Values.flowSchema.priorityLevel }}
+  rules:
+    - subjects:
+        - kind: ServiceAccount
+          serviceAccount:
+            namespace: {{ include "kseer-agent.namespace" . }}
+            name: {{ include "kseer-agent.serviceAccountName" . }}
+      resourceRules:
+        - apiGroups: ["*"]
+          resources: ["*"]
+          namespaces: ["*"]
+          verbs: ["get", "list", "watch"]
+{{- end }}

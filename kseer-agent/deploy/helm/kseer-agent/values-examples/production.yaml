@@ -1,0 +1,92 @@
+# Production configuration example for in-cluster deployment
+
+mode: in-cluster
+
+image:
+  repository: registry.example.com/kseer/kseer-agent
+  tag: "0.0.34"
+  pullPolicy: IfNotPresent
+
+cluster:
+  name: "production-cluster"
+  # Watch critical namespaces only
+  namespaces:
+    - production
+    - api-services
+    - data-services
+  # Watch specific resources to reduce load
+  resources:
+    - apiVersion: "v1"
+      kind: "Pod"
+    - apiVersion: "v1"
+      kind: "Service"
+    - apiVersion: "apps/v1"
+      kind: "Deployment"
+    - apiVersion: "apps/v1"
+      kind: "StatefulSet"
+    - apiVersion: "apps/v1"
+      kind: "DaemonSet"
+
+outputs:
+  clickhouse:
+    enabled: true
+    host: "clickhouse.example.com"
+    port: 9440   # native protocol over TLS; 9000 without TLS
+    database: "kseer"
+    table: "kubernetes_events"
+    tls: true
+    tlsSkipVerify: true
+    batchSize: 1000
+    credentialsSecret:
+      create: false
+      name: "kseer-clickhouse-creds"
+  kafka:
+    enabled: false
+  stdout:
+    enabled: false
+
+buffer:
+  size: 500000
+  flushInterval: "3s"
+  retryInterval: "30s"
+  batchSize: 25000
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 4Gi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+# Security
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  fsGroup: 65534
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+
+# High availability
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - kseer-agent
+          topologyKey: kubernetes.io/hostname
+
+logging:
+  level: info

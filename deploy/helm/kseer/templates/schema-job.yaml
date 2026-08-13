@@ -1,0 +1,82 @@
+{{- if .Values.schema.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  # A Job's pod template is immutable, so the release revision is part of the
+  # name. Helm prunes the previous revision's Job on upgrade, which keeps the
+  # logs of the most recent run around without piling up history.
+  name: {{ include "kseer.schema.fullname" . }}-{{ .Release.Revision }}
+  labels:
+    {{- include "kseer.labels" (dict "root" $ "component" "schema" "values" .Values.schema "kind" "deployment") | nindent 4 }}
+  {{- with (include "kseer.annotations" (dict "root" $ "values" .Values.schema "kind" "deployment")) }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+spec:
+  backoffLimit: {{ .Values.schema.backoffLimit }}
+  {{- with .Values.schema.ttlSecondsAfterFinished }}
+  ttlSecondsAfterFinished: {{ . }}
+  {{- end }}
+  template:
+    metadata:
+      labels:
+        {{- include "kseer.labels" (dict "root" $ "component" "schema" "values" .Values.schema "kind" "pod") | nindent 8 }}
+      {{- with (include "kseer.annotations" (dict "root" $ "values" .Values.schema "kind" "pod")) }}
+      annotations:
+        {{- . | nindent 8 }}
+      {{- end }}
+    spec:
+      restartPolicy: Never
+      {{- include "kseer.imagePullSecrets" . | nindent 6 }}
+      {{- with .Values.schema.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: schema
+          image: "{{ .Values.schema.image.repository }}:{{ .Values.schema.image.tag }}"
+          imagePullPolicy: {{ .Values.schema.image.pullPolicy }}
+          {{- with .Values.schema.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          command: ["sh", "/kseer/run.sh"]
+          env:
+            - name: CLICKHOUSE_URL
+              value: {{ include "kseer.schema.clickhouseUrl" . | quote }}
+            - name: CLICKHOUSE_DATABASE
+              value: {{ .Values.schema.database | quote }}
+            - name: SCHEMA_MODE
+              value: {{ .Values.schema.mode | quote }}
+            - name: CLICKHOUSE_CLUSTER
+              value: {{ .Values.schema.cluster | quote }}
+            - name: DROP_EXISTING
+              value: {{ .Values.schema.dropExisting | quote }}
+            - name: CREATE_DATABASE
+              value: {{ .Values.schema.createDatabase | quote }}
+            - name: TLS_SKIP_VERIFY
+              value: {{ .Values.schema.clickhouse.tlsSkipVerify | quote }}
+            - name: WAIT_TIMEOUT_SECONDS
+              value: {{ .Values.schema.waitTimeoutSeconds | quote }}
+            - name: CLICKHOUSE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kseer.schema.secretName" . }}
+                  key: username
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kseer.schema.secretName" . }}
+                  key: password
+          resources:
+            {{- toYaml .Values.schema.resources | nindent 12 }}
+          volumeMounts:
+            - name: schema
+              mountPath: /kseer
+              readOnly: true
+      volumes:
+        - name: schema
+          configMap:
+            name: {{ include "kseer.schema.fullname" . }}
+      {{- include "kseer.scheduling" (dict "root" $ "values" .Values.schema) | nindent 6 }}
+{{- end }}

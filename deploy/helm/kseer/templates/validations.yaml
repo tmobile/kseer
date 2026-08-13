@@ -1,0 +1,6 @@
+{{/*
+Renders nothing. Exists so the guards in _validations.tpl run for every
+`helm template`, `helm install`, and `helm upgrade`, not just when a particular
+component happens to be enabled.
+*/}}
+{{- include "kseer.validate" . -}}

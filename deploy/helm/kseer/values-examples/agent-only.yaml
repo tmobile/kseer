@@ -1,0 +1,38 @@
+# Agent alone, for every cluster that reports into a central store.
+#
+# Install this in each watched cluster; install the UI and schema once,
+# somewhere central. Nothing here depends on the other components beyond
+# agreeing on the database and table.
+#
+#   helm install kseer ./deploy/helm/kseer -n kseer --create-namespace \
+#     -f ./deploy/helm/kseer/values-examples/agent-only.yaml \
+#     --set agent.cluster.name=<this-cluster>
+
+clickhouse:
+  enabled: false
+schema:
+  enabled: false
+ui:
+  enabled: false
+
+agent:
+  enabled: true
+  cluster:
+    # The value that ends up in the cluster_name column. Make it unique per
+    # cluster; it is how the UI tells them apart.
+    name: ""
+  image:
+    repository: registry.example.com/kseer/kseer-agent
+    tag: ""
+  outputs:
+    clickhouse:
+      enabled: true
+      host: clickhouse.example.com
+      port: 9440
+      tls: true
+      database: kseer
+      table: kubernetes_events
+      eventsTable: kubernetes_events
+      credentialsSecret:
+        create: false
+        name: clickhouse-writer

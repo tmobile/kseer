@@ -1,0 +1,27 @@
+apiVersion: v2
+name: kseer
+description: Kubernetes object history platform — agent, ClickHouse schema, and UI in one release
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - kubernetes
+  - history
+  - audit
+  - clickhouse
+  - observability
+home: https://github.com/kseer/kseer
+maintainers:
+  - name: Kseer Team
+
+# The agent is not re-implemented here. This chart depends on the component
+# chart that lives with the agent source, aliased to `agent` so its values sit
+# under the same key as every other component in values.yaml. Run
+# `helm dependency update` (or `build`) before installing to vendor it into
+# charts/.
+dependencies:
+  - name: kseer-agent
+    alias: agent
+    version: "0.3.0"
+    repository: "file://../../../kseer-agent/deploy/helm/kseer-agent"
+    condition: agent.enabled

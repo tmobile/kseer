@@ -1,0 +1,103 @@
+# Vault Configuration Example - AppRole Auth
+# Use this for standalone deployments with AppRole
+mode: multi-cluster
+
+clusters: []
+
+vault:
+  # Use AppRole for authentication
+  auth_method: "approle"
+  
+  approle_auth:
+    role_id_file: ".vault-role-id-internal"
+    secret_id_file: ".vault-secret-id-internal"
+    mount_path: "approle"
+  
+  refresh_interval: "10m"
+  
+  tls_skip_verify: true
+  # ca_cert: "/etc/vault/ca.crt"
+
+
+# Output destinations for Kubernetes events
+# Supports multiple outputs (kafka, clickhouse, stdout)
+outputs:
+  # - type: kafka
+  #   config:
+  #     brokers:
+  #       - localhost:9092
+  #     topic: "kubernetes-events"
+  #     compression: "snappy"
+
+  # ClickHouse direct output (optional - for external ClickHouse)
+  # Uncomment to send events directly to ClickHouse without Kafka
+  # - type: clickhouse
+  #   config:
+  #     host: "localhost"
+  #     port: 9001
+  #     database: "kseer"
+  #     table: "kubernetes_events"
+  #     username: ""
+  #     password: ""
+  #     batch_size: 100
+  #     table_version: "object_json"  # Options: "object_json" (JSON), "object_string" (String), "object_normalized" (Structured Tuple)
+  #     secure: false  # Set to true for TLS
+
+  - type: clickhouse
+    config:
+      host: "localhost"
+      port: 9000  # or 9000 without TLS
+      database: "kseer"
+      table: "kubernetes_events"
+      username: ""
+      password: ""
+      tls: false
+      tls_skip_verify: false  # Ignore certificate errors
+      batch_size: 1000
+      table_version: "object_json"  # Options: "object_json" (JSON), "object_string" (String), "object_normalized" (Structured Tuple)
+
+# Default watch configuration applied to clusters that don't override it.
+# Tiers assign per-kind sync strategies on top of the legacy LIST+WATCH path.
+# default_watch_config:
+#   resync_interval: 0   # Global P2 resync (0 = disabled). Independent of P1 tier.
+#   tiers:
+#     p1:
+#       # Sequential per-kind re-LIST with synchronous flush between kinds.
+#       # P1 LISTs are non-paginated; use only for low-cardinality kinds.
+#       resync_interval: 5m
+#       kinds:
+#         - kind: Namespace
+#         - kind: Node
+#         - kind: NetworkPolicy
+#           resync_interval: 1m   # per-kind override
+#     p3:
+#       # No WATCH; periodic LIST. The agent does not emit DELETED events for
+#       # P3 kinds — clients determine "live" objects by filtering events to
+#       # within the most recent relist_interval window.
+#       relist_interval: 1h
+#       kinds:
+#         - kind: BigCustomResource
+#           apiVersion: foo.example.com/v1   # optional; only when ambiguous
+#           relist_interval: 6h
+
+# Buffer configuration
+buffer:
+  # In-memory buffer size (number of events)
+  size: 50000
+  # How often to flush buffered events
+  flush_interval: "500ms"
+  # Retry interval for failed sends
+  retry_interval: "30s"
+  # Batch size for sending to outputs
+  batch_size: 1000
+
+# Concurrency control (memory protection)
+concurrency_control:
+  # Enable concurrency limits (set to false to disable semaphores)
+  enabled: true
+  # Maximum concurrent LIST operations across all clusters
+  max_global_lists: 30
+  # Maximum concurrent LIST operations per cluster
+  max_lists_per_cluster: 10
+  # Maximum concurrent cluster initializations
+  max_cluster_inits: 5

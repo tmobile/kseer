@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  kseer-agent:
+    image: kseer/kseer-agent:latest
+    container_name: kseer-agent
+    restart: unless-stopped
+    
+    # Mount configuration and kubeconfig files
+    volumes:
+      - ./config.yaml:/etc/kseer-agent/config.yaml:ro
+      - ./kubeconfigs:/kubeconfigs:ro
+      # Optional: mount credentials
+      # - ./credentials:/credentials:ro
+    
+    # Environment variables
+    environment:
+      - LOG_LEVEL=info
+      - KSEER_MODE=multi-cluster
+    
+    # Network mode
+    network_mode: bridge
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "kseer-agent"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# Optional: Add Kafka for local testing
+# Uncomment if you want to run Kafka locally
+#   zookeeper:
+#     image: confluentinc/cp-zookeeper:latest
+#     environment:
+#       ZOOKEEPER_CLIENT_PORT: 2181
+#       ZOOKEEPER_TICK_TIME: 2000
+#     ports:
+#       - "2181:2181"
+#
+#   kafka:
+#     image: confluentinc/cp-kafka:latest
+#     depends_on:
+#       - zookeeper
+#     ports:
+#       - "9092:9092"
+#     environment:
+#       KAFKA_BROKER_ID: 1
+#       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+#       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+#       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+

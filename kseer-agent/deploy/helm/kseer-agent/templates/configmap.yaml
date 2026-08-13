@@ -1,0 +1,153 @@
+{{- if eq .Values.mode "in-cluster" -}}
+{{- include "kseer-agent.validateClickHouseCredentials" . -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kseer-agent.fullname" . }}
+  namespace: {{ include "kseer-agent.namespace" . }}
+  labels:
+    {{- include "kseer-agent.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    # Deployment mode - in-cluster for Helm deployments
+    mode: {{ .Values.mode }}
+
+    # Cluster configuration
+    clusters:
+      - name: {{ .Values.cluster.name | quote }}
+        # Empty kubeconfig means use in-cluster service account
+        kubeconfig: ""
+        context: ""
+        {{- if .Values.cluster.namespaces }}
+        namespaces:
+        {{- toYaml .Values.cluster.namespaces | nindent 10 }}
+        {{- else }}
+        namespaces: []
+        {{- end }}
+        {{- if .Values.cluster.resources }}
+        resources:
+        {{- toYaml .Values.cluster.resources | nindent 10 }}
+        {{- else }}
+        resources: []
+        {{- end }}
+
+    # Output destinations
+    {{- $hasOutputs := or .Values.outputs.clickhouse.enabled .Values.outputs.kafka.enabled .Values.outputs.stdout.enabled }}
+    {{- if not $hasOutputs }}
+    {{- fail "ERROR: At least one output must be enabled (outputs.clickhouse.enabled, outputs.kafka.enabled, or outputs.stdout.enabled)" }}
+    {{- end }}
+    outputs:
+      {{- if .Values.outputs.clickhouse.enabled }}
+      - type: clickhouse
+        config:
+          host: {{ .Values.outputs.clickhouse.host | quote }}
+          port: {{ .Values.outputs.clickhouse.port }}
+          database: {{ .Values.outputs.clickhouse.database | quote }}
+          table: {{ .Values.outputs.clickhouse.table | quote }}
+          {{- if .Values.outputs.clickhouse.eventsTable }}
+          events_table: {{ .Values.outputs.clickhouse.eventsTable | quote }}
+          {{- end }}
+          tls: {{ .Values.outputs.clickhouse.tls }}
+          tls_skip_verify: {{ .Values.outputs.clickhouse.tlsSkipVerify }}
+          batch_size: {{ .Values.outputs.clickhouse.batchSize }}
+          {{- if .Values.outputs.clickhouse.tableVersion }}
+          table_version: {{ .Values.outputs.clickhouse.tableVersion | quote }}
+          {{- end }}
+      {{- end }}
+      {{- if .Values.outputs.kafka.enabled }}
+      - type: kafka
+        config:
+          brokers:
+          {{- range .Values.outputs.kafka.brokers }}
+            - {{ . | quote }}
+          {{- end }}
+          topic: {{ .Values.outputs.kafka.topic | quote }}
+          compression: {{ .Values.outputs.kafka.compression | quote }}
+          {{- if .Values.outputs.kafka.config }}
+          {{- toYaml .Values.outputs.kafka.config | nindent 10 }}
+          {{- end }}
+      {{- end }}
+      {{- if .Values.outputs.stdout.enabled }}
+      - type: stdout
+        config:
+          pretty: {{ .Values.outputs.stdout.pretty }}
+      {{- end }}
+
+    # Local buffering configuration
+    buffer:
+      size: {{ .Values.buffer.size }}
+      flush_interval: {{ .Values.buffer.flushInterval | quote }}
+      retry_interval: {{ .Values.buffer.retryInterval | quote }}
+      batch_size: {{ .Values.buffer.batchSize }}
+
+    # Concurrency control
+    concurrency_control:
+      enabled: {{ .Values.concurrencyControl.enabled }}
+      max_global_lists: {{ .Values.concurrencyControl.maxGlobalLists }}
+      max_lists_per_cluster: {{ .Values.concurrencyControl.maxListsPerCluster }}
+      max_cluster_inits: {{ .Values.concurrencyControl.maxClusterInits }}
+
+    # Default watch configuration applied to all clusters
+    default_watch_config:
+      initial_backoff: {{ .Values.watchConfig.initialBackoff | quote }}
+      max_backoff: {{ .Values.watchConfig.maxBackoff | quote }}
+      timeout_seconds: {{ .Values.watchConfig.timeoutSeconds }}
+      allow_bookmarks: {{ .Values.watchConfig.allowBookmarks }}
+      list_page_size: {{ .Values.watchConfig.listPageSize }}
+      resync_interval: {{ .Values.watchConfig.resyncInterval | quote }}
+      seeder_query_retries: {{ .Values.watchConfig.seederQueryRetries | default 2 }}
+      seeder_query_backoff: {{ .Values.watchConfig.seederQueryBackoff | default "2s" | quote }}
+      {{- with .Values.watchConfig.tiers }}
+      {{- if or .p1.kinds .p3.kinds .p4.kinds .p5.kinds }}
+      tiers:
+        {{- if .p1.kinds }}
+        p1:
+          resync_interval: {{ .p1.resyncInterval | quote }}
+          kinds:
+            {{- range .p1.kinds }}
+            - kind: {{ .kind | quote }}
+              {{- if .apiVersion }}
+              apiVersion: {{ .apiVersion | quote }}
+              {{- end }}
+              {{- if .resyncInterval }}
+              resync_interval: {{ .resyncInterval | quote }}
+              {{- end }}
+            {{- end }}
+        {{- end }}
+        {{- if .p3.kinds }}
+        p3:
+          relist_interval: {{ .p3.relistInterval | quote }}
+          kinds:
+            {{- range .p3.kinds }}
+            - kind: {{ .kind | quote }}
+              {{- if .apiVersion }}
+              apiVersion: {{ .apiVersion | quote }}
+              {{- end }}
+              {{- if .relistInterval }}
+              relist_interval: {{ .relistInterval | quote }}
+              {{- end }}
+            {{- end }}
+        {{- end }}
+        {{- if .p4.kinds }}
+        p4:
+          kinds:
+            {{- range .p4.kinds }}
+            - kind: {{ .kind | quote }}
+              {{- if .apiVersion }}
+              apiVersion: {{ .apiVersion | quote }}
+              {{- end }}
+            {{- end }}
+        {{- end }}
+        {{- if .p5.kinds }}
+        p5:
+          kinds:
+            {{- range .p5.kinds }}
+            - kind: {{ .kind | quote }}
+              {{- if .apiVersion }}
+              apiVersion: {{ .apiVersion | quote }}
+              {{- end }}
+            {{- end }}
+        {{- end }}
+      {{- end }}
+      {{- end }}
+{{- end }}

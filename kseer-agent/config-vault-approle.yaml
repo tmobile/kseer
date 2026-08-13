@@ -1,0 +1,41 @@
+# Vault Configuration Example - AppRole Auth
+# Use this for standalone deployments with AppRole
+mode: multi-cluster
+
+clusters: []
+
+vault:
+  # Vault address - can be set via KSEER_VAULT_ADDRESS env var
+  # address: "https://vault.example.com"
+  
+  # Use AppRole for authentication
+  auth_method: "approle"
+  
+  approle_auth:
+    role_id_file: ".vault-role-id"
+    secret_id_file: ".vault-secret-id"
+    mount_path: "approle"
+  
+  # Secret path - can be set via KSEER_VAULT_SECRET_PATH env var
+  # secret_path: "kseer/clusters"
+  
+  refresh_interval: "10m"
+  
+  tls_skip_verify: true
+  # ca_cert: "/etc/vault/ca.crt"
+
+  # Vault namespace - can be set via KSEER_VAULT_NAMESPACE env var
+  # namespace: "my-namespace"
+
+outputs:
+  - type: kafka
+    config:
+      brokers:
+        - localhost:9092
+      topic: "kubernetes-events"
+      compression: "snappy"
+
+buffer:
+  size: 100000
+  flush_interval: "2s"
+  retry_interval: "30s"

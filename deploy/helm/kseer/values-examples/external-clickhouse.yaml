@@ -1,0 +1,73 @@
+# The production shape: agent and UI in the cluster, ClickHouse somewhere else.
+#
+# Credentials come from Secrets created out of band, so nothing sensitive ends
+# up in this file or in the release. Create them first:
+#
+#   kubectl -n kseer create secret generic clickhouse-writer \
+#     --from-literal=username=<user> --from-literal=password=<pass>
+#
+#   helm install kseer ./deploy/helm/kseer -n kseer --create-namespace \
+#     -f ./deploy/helm/kseer/values-examples/external-clickhouse.yaml \
+#     --set agent.cluster.name=<this-cluster>
+
+clickhouse:
+  enabled: false
+
+schema:
+  enabled: true
+  # ReplicatedMergeTree storage plus a Distributed table, created ON CLUSTER.
+  # Needs a real cluster with Keeper.
+  mode: distributed
+  cluster: default
+  database: kseer
+  # Turn on for the very first install if the database does not exist yet.
+  createDatabase: false
+  clickhouse:
+    url: https://clickhouse.example.com:8443
+    tlsSkipVerify: false
+    auth:
+      # Needs CREATE TABLE on the database, so this is often a different,
+      # more privileged account than the agent's.
+      existingSecret: clickhouse-admin
+
+agent:
+  enabled: true
+  cluster:
+    name: ""
+  image:
+    repository: registry.example.com/kseer/kseer-agent
+    tag: ""
+  outputs:
+    clickhouse:
+      enabled: true
+      # Native protocol, not the HTTP endpoint the schema Job and UI use.
+      host: clickhouse.example.com
+      port: 9440
+      tls: true
+      database: kseer
+      table: kubernetes_events
+      eventsTable: kubernetes_events
+      credentialsSecret:
+        create: false
+        name: clickhouse-writer
+
+ui:
+  enabled: true
+  image:
+    repository: registry.example.com/kseer/kseer-object-history
+    tag: ""
+  clickhouse:
+    # HTTP interface. Queries are proxied here from the browser, and each user
+    # signs in with their own ClickHouse credentials.
+    url: https://clickhouse.example.com:8443
+    database: kseer
+    table: kubernetes_events
+    sslVerify: true
+  ingress:
+    enabled: true
+    className: nginx
+    host: kseer.example.com
+    tls:
+      - secretName: kseer-ui-tls
+        hosts:
+          - kseer.example.com

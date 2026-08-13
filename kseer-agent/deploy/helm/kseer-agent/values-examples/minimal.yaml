@@ -1,0 +1,23 @@
+# Minimal configuration example - just stdout output for testing
+
+mode: in-cluster
+
+cluster:
+  name: "test-cluster"
+
+outputs:
+  clickhouse:
+    enabled: false
+  kafka:
+    enabled: false
+  stdout:
+    enabled: true
+    pretty: true
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi

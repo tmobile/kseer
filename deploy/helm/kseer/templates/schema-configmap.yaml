@@ -1,0 +1,162 @@
+{{- if .Values.schema.enabled }}
+{{- $db := .Values.schema.database }}
+{{- $cluster := .Values.schema.cluster }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kseer.schema.fullname" . }}
+  labels:
+    {{- include "kseer.labels" (dict "root" $ "component" "schema" "values" .Values.schema "kind" "deployment") | nindent 4 }}
+data:
+  {{/*
+    The DDL is the same set of files backend/sql/ ships, vendored into the chart
+    because Helm cannot read files outside a chart directory. ${database} and
+    ${cluster} are substituted here, at render time, so the container needs
+    nothing but curl.
+  */}}
+  {{- range $path, $_ := .Files.Glob (printf "files/sql/%s/*.sql" .Values.schema.mode) }}
+  {{ base $path }}: |
+{{ $.Files.Get $path | replace "${database}" $db | replace "${cluster}" $cluster | indent 4 }}
+  {{- end }}
+
+  # In-cluster equivalent of backend/init-scripts-sh/init.sh: same preflight
+  # checks and the same ordering, but the SQL arrives pre-rendered and it speaks
+  # POSIX sh so it can run on a plain curl image.
+  run.sh: |
+    #!/bin/sh
+    set -eu
+
+    URL="${CLICKHOUSE_URL%/}"
+    DB="$CLICKHOUSE_DATABASE"
+    MODE="$SCHEMA_MODE"
+    CLUSTER="${CLICKHOUSE_CLUSTER:-}"
+    CH_USER="${CLICKHOUSE_USER:-}"
+    CH_PASS="${CLICKHOUSE_PASSWORD:-}"
+
+    FLAGS="--silent --show-error --fail-with-body --max-time 120"
+    if [ "${TLS_SKIP_VERIFY:-false}" = "true" ]; then
+        FLAGS="$FLAGS --insecure"
+    fi
+
+    if [ "$MODE" = distributed ]; then
+        ON_CLUSTER=" ON CLUSTER $CLUSTER"
+        # The distributed table reads from the local one, so it drops first.
+        DROP_ORDER="kubernetes_events kubernetes_events_local"
+    else
+        ON_CLUSTER=""
+        DROP_ORDER="kubernetes_events"
+    fi
+
+    # Send one statement over the HTTP interface. Credentials go on the command
+    # line only when a username is set, so an unauthenticated server still works.
+    ch() {
+        if [ -n "$CH_USER" ]; then
+            printf '%s' "$1" | curl $FLAGS -u "$CH_USER:$CH_PASS" \
+                --data-binary @- "$URL/?allow_experimental_json_type=1"
+        else
+            printf '%s' "$1" | curl $FLAGS \
+                --data-binary @- "$URL/?allow_experimental_json_type=1"
+        fi
+    }
+
+    trim() { tr -d '[:space:]'; }
+
+    echo "========================================"
+    echo "KSeer ClickHouse schema initialization"
+    echo "========================================"
+    echo "Mode:      $MODE"
+    echo "URL:       $URL"
+    echo "Database:  $DB"
+    if [ "$MODE" = distributed ]; then
+        echo "Cluster:   $CLUSTER"
+    fi
+    echo "Drop:      ${DROP_EXISTING:-false}"
+    echo "========================================"
+
+    # The Job may start before ClickHouse is accepting connections — on a fresh
+    # install they are created at the same moment.
+    deadline=$(( $(date +%s) + ${WAIT_TIMEOUT_SECONDS:-300} ))
+    until ch "SELECT 1" >/dev/null 2>&1; do
+        if [ "$(date +%s)" -ge "$deadline" ]; then
+            echo "ERROR: ClickHouse at $URL did not become reachable in time." >&2
+            echo "Last attempt said:" >&2
+            ch "SELECT 1" >&2 || true
+            exit 1
+        fi
+        echo "Waiting for ClickHouse at $URL ..."
+        sleep 5
+    done
+    echo "Connected to ClickHouse."
+
+    if [ "${CREATE_DATABASE:-false}" = "true" ]; then
+        ch "CREATE DATABASE IF NOT EXISTS \"$DB\"$ON_CLUSTER" >/dev/null
+        echo "Ensured database $DB exists."
+    fi
+
+    if [ "$(ch "SELECT count() FROM system.databases WHERE name = '$DB'" | trim)" = "0" ]; then
+        echo "ERROR: database '$DB' does not exist." >&2
+        echo "Create it, or set schema.createDatabase=true to have this Job create it." >&2
+        exit 1
+    fi
+
+    if [ "$MODE" = distributed ]; then
+        if [ "$(ch "SELECT count() FROM system.clusters WHERE cluster = '$CLUSTER'" | trim)" = "0" ]; then
+            echo "ERROR: no ClickHouse cluster named '$CLUSTER' in system.clusters." >&2
+            echo "Set schema.cluster to a real cluster, or use schema.mode=single." >&2
+            exit 1
+        fi
+        # A cluster entry is not enough. Stock single-node images define a
+        # "default" cluster but run no Keeper, and ReplicatedMergeTree needs one.
+        # system.zookeeper_connection only exists once Keeper is configured.
+        keeper=$(ch "SELECT count() FROM system.tables WHERE database = 'system' AND name = 'zookeeper_connection'" | trim)
+        if [ "$keeper" = "0" ]; then
+            echo "ERROR: this server has no ClickHouse Keeper configured, which" >&2
+            echo "ReplicatedMergeTree requires. Use schema.mode=single for a standalone node." >&2
+            exit 1
+        fi
+    fi
+
+    # Every statement is CREATE ... IF NOT EXISTS, so switching topology over an
+    # existing install would otherwise "succeed" while leaving the old table —
+    # and the agent would keep writing to a table that is no longer part of the
+    # intended layout.
+    if [ "${DROP_EXISTING:-false}" != "true" ]; then
+        if [ "$MODE" = distributed ]; then expected=Distributed; else expected=MergeTree; fi
+        existing=$(ch "SELECT engine FROM system.tables WHERE database = '$DB' AND name = 'kubernetes_events'" | trim)
+        if [ -n "$existing" ] && [ "$existing" != "$expected" ]; then
+            echo "ERROR: $DB.kubernetes_events already exists with engine $existing," >&2
+            echo "but $MODE mode expects $expected. Set schema.dropExisting=true to recreate it" >&2
+            echo "(this discards existing history)." >&2
+            exit 1
+        fi
+    fi
+
+    if [ "${DROP_EXISTING:-false}" = "true" ]; then
+        for t in $DROP_ORDER; do
+            # SYNC is required, not cosmetic: without it the Atomic database
+            # engine defers the drop, the ReplicatedMergeTree path lingers in
+            # Keeper, and recreating immediately fails with REPLICA_ALREADY_EXISTS.
+            if ch "DROP TABLE IF EXISTS \"$DB\".$t$ON_CLUSTER SYNC" >/dev/null 2>&1; then
+                echo "Dropped $t"
+            else
+                echo "WARNING: could not drop $t" >&2
+            fi
+        done
+    fi
+
+    for f in /kseer/*.sql; do
+        [ -e "$f" ] || { echo "ERROR: no .sql files mounted at /kseer" >&2; exit 1; }
+        echo "Executing $(basename "$f") ..."
+        # ON CLUSTER DDL replies with a per-host status table; only show it when
+        # something went wrong.
+        if ! out=$(ch "$(cat "$f")" 2>&1); then
+            echo "ERROR: $(basename "$f") failed" >&2
+            if [ -n "$out" ]; then echo "$out" >&2; fi
+            exit 1
+        fi
+    done
+
+    echo "========================================"
+    echo "Schema ready in $DB."
+    echo "========================================"
+{{- end }}

@@ -1,0 +1,129 @@
+{{- if .Values.clickhouse.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "kseer.clickhouse.fullname" . }}
+  labels:
+    {{- include "kseer.labels" (dict "root" $ "component" "clickhouse" "values" .Values.clickhouse "kind" "deployment") | nindent 4 }}
+  {{- with (include "kseer.annotations" (dict "root" $ "values" .Values.clickhouse "kind" "deployment")) }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+spec:
+  serviceName: {{ include "kseer.clickhouse.fullname" . }}
+  replicas: {{ .Values.clickhouse.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "kseer.selectorLabels" (dict "root" $ "component" "clickhouse") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kseer.labels" (dict "root" $ "component" "clickhouse" "values" .Values.clickhouse "kind" "pod") | nindent 8 }}
+      annotations:
+        # Roll the pod when settings change; ClickHouse only reads users.d
+        # profile changes on restart.
+        checksum/config: {{ include (print $.Template.BasePath "/clickhouse-configmap.yaml") . | sha256sum }}
+        {{- with (include "kseer.annotations" (dict "root" $ "values" .Values.clickhouse "kind" "pod")) }}
+        {{- . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- include "kseer.imagePullSecrets" . | nindent 6 }}
+      {{- with .Values.clickhouse.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: clickhouse
+          image: "{{ .Values.clickhouse.image.repository }}:{{ .Values.clickhouse.image.tag }}"
+          imagePullPolicy: {{ .Values.clickhouse.image.pullPolicy }}
+          {{- with .Values.clickhouse.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: 8123
+              protocol: TCP
+            - name: native
+              containerPort: 9000
+              protocol: TCP
+          env:
+            # The entrypoint creates this database and the user below on first
+            # start, which is what lets the schema Job find its database.
+            - name: CLICKHOUSE_DB
+              value: {{ .Values.clickhouse.database | quote }}
+            - name: CLICKHOUSE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kseer.clickhouse.secretName" . }}
+                  key: username
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kseer.clickhouse.secretName" . }}
+                  key: password
+            # Lets the created user run GRANT/CREATE USER, which is expected of
+            # an admin account.
+            - name: CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT
+              value: "1"
+          # /ping answers before the server is fully ready to serve queries, so
+          # a generous startupProbe covers a cold start with a large data dir.
+          startupProbe:
+            httpGet:
+              path: /ping
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.clickhouse.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/clickhouse
+            # subPath mounts, not whole directories: the image's entrypoint
+            # writes its own generated files into config.d and users.d, and a
+            # read-only directory mount there breaks startup.
+            - name: config
+              mountPath: /etc/clickhouse-server/config.d/kseer.xml
+              subPath: kseer.xml
+              readOnly: true
+            - name: config
+              mountPath: /etc/clickhouse-server/users.d/kseer-profiles.xml
+              subPath: kseer-profiles.xml
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "kseer.clickhouse.fullname" . }}-config
+        {{- if not .Values.clickhouse.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+      {{- include "kseer.scheduling" (dict "root" $ "values" .Values.clickhouse) | nindent 6 }}
+  {{- if .Values.clickhouse.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        {{- with .Values.clickhouse.persistence.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.clickhouse.persistence.size }}
+  {{- end }}
+{{- end }}

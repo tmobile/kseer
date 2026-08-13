@@ -1,0 +1,412 @@
+# Default values for the unified kseer chart.
+#
+# The platform is four independent pieces, each with its own `enabled` flag:
+#
+#   clickhouse  An optional single-node ClickHouse, for evaluation only.
+#   schema      A Job that creates the kubernetes_events table(s).
+#   agent       The watcher that streams Kubernetes objects into ClickHouse.
+#               Provided by the kseer-agent subchart; every value from that
+#               chart is settable under this key.
+#   ui          The object-history web app.
+#
+# Turn on the ones you want. The three components that talk to ClickHouse must
+# agree on endpoint, database, and table — the chart checks that at render time
+# and refuses to install a combination that would silently produce an empty UI.
+#
+# See ./README.md for the full reference and worked examples, and
+# ./values-examples/ for ready-made value files.
+
+# Prefix for the names of resources this chart creates. Leave empty to derive
+# them from the release name.
+nameOverride: ""
+fullnameOverride: ""
+
+# Applied to every pod this chart creates, including the agent's.
+# Example: [{ name: my-registry-credentials }]
+imagePullSecrets: []
+
+# =============================================================================
+# CHART-WIDE DEFAULTS
+# =============================================================================
+# Each component can override these; anything left unset there falls back here.
+# They do not reach the agent subchart, which has its own equivalents.
+
+# Extra labels, split by the kind of resource they land on.
+labels:
+  deployment: {}
+  pod: {}
+  service: {}
+
+annotations:
+  deployment: {}
+  pod: {}
+  service: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# =============================================================================
+# CLICKHOUSE (bundled, evaluation only)
+# =============================================================================
+# A single ClickHouse pod so you can see the whole pipeline work without
+# standing up a datastore first. It has no replication, no ClickHouse Keeper,
+# no backups, and no upgrade story.
+#
+# For anything you care about, leave this off and point the other components at
+# a real deployment (the ClickHouse operator, ClickHouse Cloud, or an existing
+# cluster) via schema.clickhouse.url, ui.clickhouse.url, and
+# agent.outputs.clickhouse.host.
+clickhouse:
+  enabled: false
+
+  # Must stay 1. Scaling this out needs Keeper and replicated tables, which
+  # this chart does not deploy.
+  replicaCount: 1
+
+  image:
+    repository: clickhouse/clickhouse-server
+    tag: "25.8.16.34"
+    pullPolicy: IfNotPresent
+
+  # Created on first start. Keep it equal to schema.database.
+  database: kseer
+
+  auth:
+    # Admin user the schema Job, the agent, and UI logins all use. Naming it
+    # anything other than "default" makes the image's entrypoint replace the
+    # built-in passwordless `default` account rather than leave it in place.
+    username: kseer
+    # No default on purpose — set one, or supply existingSecret.
+    password: ""
+    # Secret with `username` and `password` keys. When set, the two fields
+    # above are ignored and nothing sensitive is written into the release.
+    existingSecret: ""
+
+  service:
+    type: ClusterIP
+    # HTTP interface. The schema Job and the UI's nginx proxy use this.
+    httpPort: 8123
+    # Native protocol. The agent uses this.
+    nativePort: 9000
+
+  persistence:
+    # Off means an emptyDir, and every restart starts from an empty database.
+    enabled: true
+    # Empty uses the cluster's default StorageClass.
+    storageClass: ""
+    size: 50Gi
+
+  settings:
+    # trace / debug / information / warning / error
+    logLevel: information
+    # Applied to the default profile. Keep max_memory_usage comfortably below
+    # the memory limit below, or ClickHouse gets OOM-killed instead of
+    # returning a clean "memory limit exceeded".
+    maxMemoryUsage: 4000000000
+    maxThreads: 4
+
+  resources:
+    limits:
+      cpu: 2
+      memory: 6Gi
+    requests:
+      cpu: 500m
+      memory: 2Gi
+
+  # 101 is the clickhouse user inside the official image; fsGroup makes the
+  # data volume writable for it.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 101
+    runAsGroup: 101
+    fsGroup: 101
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+
+  labels: {}
+  annotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# =============================================================================
+# SCHEMA JOB
+# =============================================================================
+# Runs the same DDL as backend/init-scripts-sh/init.sh, from inside the
+# cluster. It waits for ClickHouse to answer, runs the same preflight checks,
+# then applies the tables. Re-running it is safe: every statement is
+# CREATE ... IF NOT EXISTS.
+#
+# The Job is named after the release revision, so `helm upgrade` runs it again
+# and prunes the previous one. Leave it enabled to have the schema reconciled
+# on every upgrade, or disable it after the first install if you would rather
+# manage the schema yourself.
+schema:
+  enabled: false
+
+  # single       one plain MergeTree table on one node.
+  # distributed  ReplicatedMergeTree storage plus a Distributed table, created
+  #              ON CLUSTER. Requires a real cluster with Keeper — it cannot be
+  #              applied to the bundled ClickHouse above.
+  #
+  # Both modes expose the same kubernetes_events table with the same columns,
+  # so the agent and UI are configured identically either way.
+  mode: single
+
+  # Must match agent.outputs.clickhouse.database and ui.clickhouse.database.
+  database: kseer
+
+  # distributed mode only: a cluster name from system.clusters.
+  cluster: default
+
+  # The Job creates tables, not databases. Turn this on to have it issue
+  # CREATE DATABASE IF NOT EXISTS first — useful against an external server
+  # where the database does not exist yet. The bundled ClickHouse creates its
+  # database itself, so this can stay off there.
+  createDatabase: false
+
+  # Drops the tables before creating them. This deletes all stored history.
+  #
+  # Needed to switch between single and distributed on an existing install,
+  # since CREATE ... IF NOT EXISTS would otherwise leave the old table in
+  # place. Set it for the one upgrade that performs the switch and then set it
+  # back — with the Job re-running on every `helm upgrade`, leaving it on wipes
+  # the data every time.
+  dropExisting: false
+
+  # How long to wait for ClickHouse to start answering before giving up. On a
+  # fresh install the Job and the database start at the same moment.
+  waitTimeoutSeconds: 300
+
+  # Pod retries before the Job is marked failed.
+  backoffLimit: 3
+
+  # Seconds to keep a finished Job. Empty keeps it (and its logs) until the
+  # next upgrade replaces it.
+  ttlSecondsAfterFinished: ""
+
+  clickhouse:
+    # HTTP endpoint, e.g. https://clickhouse.example.com:8443. Empty uses the
+    # bundled ClickHouse, which then has to be enabled.
+    url: ""
+    # For an HTTPS endpoint with a certificate the Job cannot verify.
+    tlsSkipVerify: false
+    auth:
+      # Needs CREATE TABLE on the target database. Ignored when the bundled
+      # ClickHouse is in use — the Job reuses that admin Secret instead.
+      username: ""
+      password: ""
+      # Secret with `username` and `password` keys; wins over the two above.
+      existingSecret: ""
+
+  # Any image with curl and a POSIX shell works.
+  image:
+    repository: curlimages/curl
+    tag: "8.11.1"
+    pullPolicy: IfNotPresent
+
+  resources:
+    limits:
+      cpu: 200m
+      memory: 128Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    runAsGroup: 65534
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+
+  labels: {}
+  annotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# =============================================================================
+# UI
+# =============================================================================
+# nginx serving the built object-history bundle. It also proxies /clickhouse,
+# so the browser only ever talks to this pod and ClickHouse needs no CORS
+# configuration and no public exposure.
+ui:
+  enabled: true
+  replicaCount: 1
+
+  image:
+    # No public image is published yet. Build object-history/ and push it:
+    #   docker build -t <registry>/kseer-object-history:<tag> object-history/
+    repository: registry.example.com/kseer/kseer-object-history
+    # Empty uses the chart's appVersion.
+    tag: ""
+    pullPolicy: IfNotPresent
+
+  container:
+    # Unprivileged port so the pod can run as a non-root user. The chart's
+    # nginx.conf listens here, replacing the image's own config.
+    containerPort: 8080
+
+  service:
+    type: ClusterIP
+    port: 80
+    # Only used when type is NodePort.
+    nodePort: ""
+
+  ingress:
+    enabled: false
+    className: ""
+    # Required when enabled.
+    host: ""
+    path: /
+    pathType: Prefix
+    annotations: {}
+    # Example:
+    # tls:
+    #   - secretName: kseer-ui-tls
+    #     hosts:
+    #       - kseer.example.com
+    tls: []
+
+  clickhouse:
+    # Where nginx forwards /clickhouse. Empty uses the bundled ClickHouse.
+    #
+    # Point this at ClickHouse's HTTP interface directly, or at an
+    # authenticating proxy in front of it when azure.enabled is true.
+    url: ""
+    # Must match schema.database / agent.outputs.clickhouse.database.
+    database: kseer
+    # The schema Job always creates a table with this name.
+    table: kubernetes_events
+    # Set false for an HTTPS endpoint with a certificate nginx cannot verify.
+    sslVerify: true
+    # Ceiling on a single query body.
+    maxQuerySize: 10m
+    # Long time-range queries over a large table can take a while to return.
+    proxyReadTimeout: 300s
+
+  # Microsoft Entra (MSAL) sign-in. Off means the UI shows a login form and
+  # sends the ClickHouse username and password the user types as HTTP Basic
+  # credentials, which ClickHouse itself authenticates.
+  #
+  # On, the UI acquires a token and sends it as a bearer token, which only
+  # works if ui.clickhouse.url points at a proxy that validates it. This
+  # repository does not ship that proxy.
+  azure:
+    enabled: false
+    tenantId: ""
+    clientId: ""
+    # Client ID of the proxy's app registration, for the API scope.
+    proxyClientId: ""
+    # true sends the ID token, false the access token.
+    useIdToken: false
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+  # 101 is the nginx user in the nginx:alpine image.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 101
+    runAsGroup: 101
+    fsGroup: 101
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+
+  labels: {}
+  annotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# =============================================================================
+# AGENT
+# =============================================================================
+# Everything under this key is passed to the kseer-agent subchart, which lives
+# at kseer-agent/deploy/helm/kseer-agent. Only the values you almost always
+# have to set are repeated here; the rest keep the subchart's defaults, and any
+# of them can be set under this key.
+#
+# Full reference:
+#   kseer-agent/deploy/helm/kseer-agent/values.yaml
+#   kseer-agent/deploy/helm/kseer-agent/README.md
+#
+# What is worth knowing before you edit:
+#   mode              in-cluster (a Deployment watching this cluster) or
+#                     multi-cluster (RBAC and a token Secret only, so a
+#                     central agent elsewhere can read this cluster).
+#   watchConfig.tiers Per-kind sync strategy. The defaults skip Events and
+#                     Leases and re-list low-cardinality kinds periodically.
+#   externalSecret    Pulls ClickHouse credentials from Vault through the
+#                     External Secrets Operator instead of a static Secret.
+agent:
+  enabled: true
+
+  image:
+    # No public image is published yet. Build and push it:
+    #   make -C kseer-agent docker-build docker-push
+    repository: registry.example.com/kseer/kseer-agent
+    # Empty uses the subchart's appVersion.
+    tag: ""
+
+  cluster:
+    # Stored in the cluster_name column and used to filter in the UI. Set it
+    # per install — the agent otherwise falls back to "local-cluster", which
+    # gets confusing the moment a second cluster reports in.
+    name: ""
+
+  outputs:
+    clickhouse:
+      enabled: true
+
+      # Native-protocol host. For the bundled ClickHouse this is
+      # "<release>-clickhouse"; with `helm install kseer ...` that is
+      # "kseer-clickhouse".
+      host: ""
+      port: 9000
+
+      database: kseer
+      table: kubernetes_events
+      # Queried on startup to resume from the last stored resourceVersion per
+      # kind, which avoids re-listing everything after a restart. Empty
+      # disables that.
+      eventsTable: kubernetes_events
+
+      # Credentials, one of three ways:
+      #
+      #   (A) Reference a Secret that already exists — including the bundled
+      #       ClickHouse's, which is named "<release>-clickhouse":
+      #         credentialsSecret.create: false
+      #         credentialsSecret.name: <release>-clickhouse
+      #
+      #   (B) Have Helm create one from the values below:
+      #         credentialsSecret.create: true
+      #         username / password
+      #
+      #   (C) Let the External Secrets Operator sync it from Vault:
+      #         externalSecret.enabled: true (see the subchart's values)
+      #
+      # Either way the Secret needs `username` and `password` keys.
+      credentialsSecret:
+        create: false
+        name: ""
+      username: ""
+      password: ""

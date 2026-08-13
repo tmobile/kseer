@@ -1,0 +1,81 @@
+{{- if .Values.ui.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kseer.ui.fullname" . }}
+  labels:
+    {{- include "kseer.labels" (dict "root" $ "component" "ui" "values" .Values.ui "kind" "deployment") | nindent 4 }}
+  {{- with (include "kseer.annotations" (dict "root" $ "values" .Values.ui "kind" "deployment")) }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.ui.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "kseer.selectorLabels" (dict "root" $ "component" "ui") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kseer.labels" (dict "root" $ "component" "ui" "values" .Values.ui "kind" "pod") | nindent 8 }}
+      annotations:
+        # nginx reads its config once at startup, and env-config.js is served
+        # from the same ConfigMap, so a config change has to roll the pods.
+        checksum/config: {{ include (print $.Template.BasePath "/ui-configmap.yaml") . | sha256sum }}
+        {{- with (include "kseer.annotations" (dict "root" $ "values" .Values.ui "kind" "pod")) }}
+        {{- . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- include "kseer.imagePullSecrets" . | nindent 6 }}
+      {{- with .Values.ui.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: ui
+          image: "{{ .Values.ui.image.repository }}:{{ .Values.ui.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.ui.image.pullPolicy }}
+          {{- with .Values.ui.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.ui.container.containerPort }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.ui.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+              readOnly: true
+            - name: config
+              mountPath: /usr/share/nginx/html/env-config.js
+              subPath: env-config.js
+              readOnly: true
+            # nginx keeps its pid file and request temp files here.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "kseer.ui.fullname" . }}
+        - name: tmp
+          emptyDir: {}
+      {{- include "kseer.scheduling" (dict "root" $ "values" .Values.ui) | nindent 6 }}
+{{- end }}

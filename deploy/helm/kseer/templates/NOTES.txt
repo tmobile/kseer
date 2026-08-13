@@ -1,0 +1,54 @@
+{{ .Chart.Name }} {{ .Chart.Version }} installed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+Components in this release:
+  ClickHouse (bundled) : {{ if .Values.clickhouse.enabled }}enabled — {{ include "kseer.clickhouse.fullname" . }}{{ else }}disabled{{ end }}
+  Schema Job           : {{ if .Values.schema.enabled }}enabled — {{ .Values.schema.mode }} mode, database {{ .Values.schema.database }}{{ else }}disabled{{ end }}
+  Agent                : {{ if (dig "enabled" false (.Values.agent | default dict)) }}enabled{{ else }}disabled{{ end }}
+  UI                   : {{ if .Values.ui.enabled }}enabled — {{ include "kseer.ui.fullname" . }}{{ else }}disabled{{ end }}
+
+{{- if .Values.schema.enabled }}
+
+1. Watch the schema Job finish before expecting any data:
+
+     kubectl -n {{ .Release.Namespace }} logs -f job/{{ include "kseer.schema.fullname" . }}-{{ .Release.Revision }}
+
+   It waits for ClickHouse, checks the target database, then creates the
+   tables. Re-running it is safe.
+{{- end }}
+{{- if (dig "enabled" false (.Values.agent | default dict)) }}
+
+2. Confirm the agent is connected and sending events:
+
+     kubectl -n {{ .Release.Namespace }} logs --tail=50 \
+       -l app.kubernetes.io/name=agent,app.kubernetes.io/instance={{ .Release.Name }}
+
+   Events land in {{ dig "outputs" "clickhouse" "database" "?" (.Values.agent | default dict) }}.{{ dig "outputs" "clickhouse" "table" "?" (.Values.agent | default dict) }} within a
+   couple of flush intervals of startup.
+{{- end }}
+{{- if .Values.ui.enabled }}
+
+3. Reach the UI:
+{{- if .Values.ui.ingress.enabled }}
+
+     http{{ if .Values.ui.ingress.tls }}s{{ end }}://{{ .Values.ui.ingress.host }}{{ .Values.ui.ingress.path }}
+{{- else }}
+
+     kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "kseer.ui.fullname" . }} 8080:{{ .Values.ui.service.port }}
+
+   then open http://localhost:8080
+{{- end }}
+{{- if not .Values.ui.azure.enabled }}
+
+   Sign in with a ClickHouse username and password. The UI sends them straight
+   to ClickHouse as HTTP Basic credentials.
+  {{- if .Values.clickhouse.enabled }}
+   For the bundled server, use the credentials in the
+   {{ include "kseer.clickhouse.secretName" . }} Secret:
+
+     kubectl -n {{ .Release.Namespace }} get secret {{ include "kseer.clickhouse.secretName" . }} \
+       -o jsonpath='{.data.username}' | base64 -d; echo
+  {{- end }}
+{{- end }}
+{{- end }}
+
+Full configuration reference: deploy/helm/kseer/README.md

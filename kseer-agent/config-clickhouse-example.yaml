@@ -1,0 +1,39 @@
+# KSeer Agent Configuration - Direct ClickHouse
+# This configuration sends events directly to ClickHouse without Kafka
+# Note: In-memory buffering only - events in buffer are lost on agent restart
+
+mode: multi-cluster
+
+# Cluster configuration
+clusters:
+  - name: "production-cluster"
+    kubeconfig: "/path/to/kubeconfig"
+    context: "prod-context"
+
+# Direct ClickHouse output
+outputs:
+  - type: clickhouse
+    config:
+      # Required: ClickHouse connection details
+      host: "external-clickhouse.example.com"
+      database: "kseer"
+      table: "kubernetes_events"
+      events_table: "kubernetes_events"  # Optional. Table to query for per-kind resume RVs on restart.
+                                         # If empty, agent will LIST all resources on startup (no resume from CH).
+
+      # Optional: Connection settings
+      port: 9000                       # Default: 9000 (native protocol)
+      username: "your-username"              # Default: ""
+      password: "your-secure-password" # Default: "" (empty)
+      tls: false                       # Default: false
+      batch_size: 100                  # Default: 100
+      table_version: "object_json"              # Default: "object_json", Options: "object_json" (JSON), "object_string" (String), "object_normalized" (Structured Tuple)
+
+# Buffer configuration (memory-only)
+buffer:
+  size: 100000              # Max events in memory (~200MB @ 2KB/event)
+  flush_interval: "2s"      # Flush to ClickHouse every 2s
+  retry_interval: "30s"     # Retry failed sends after 30s
+
+# Log level
+log_level: "info"

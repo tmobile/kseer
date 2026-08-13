@@ -1,0 +1,39 @@
+[Unit]
+Description=Kseer Agent - Kubernetes Multi-Cluster Watcher
+Documentation=https://github.com/kseer/kseer-agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kseer
+Group=kseer
+
+# Path to the kseer-agent binary
+ExecStart=/usr/local/bin/kseer-agent --config=/etc/kseer-agent/config.yaml
+
+# Restart policy
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kseer-agent
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/kseer-agent
+
+# Resource limits
+LimitNOFILE=65536
+
+# Environment
+Environment="LOG_LEVEL=info"
+
+[Install]
+WantedBy=multi-user.target
+

@@ -1,0 +1,70 @@
+# ---- OS ----
+.DS_Store
+Thumbs.db
+
+# ---- Editors / IDEs ----
+.idea/
+.vscode/
+.cursor/
+*.swp
+*.swo
+*~
+
+# ---- Secrets / credentials (NEVER commit) ----
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.csr
+# HashiCorp Vault AppRole material
+.vault-role-id
+.vault-secret-id
+.vault-role-id-internal
+.vault-secret-id-internal
+# Locally generated agent debug artifacts (may contain cluster tokens)
+.token
+debug-config.yaml
+
+# ---- Go (kseer-agent) ----
+# Compiled binaries (anchored so we don't ignore chart dirs named the same)
+/kseer-agent/agent
+/kseer-agent/kseer-agent
+/kseer-agent/kseer-agent-*
+*.exe
+*.test
+*.out
+coverage.html
+coverage.out
+vendor/
+go.work
+go.work.sum
+
+# ---- Node / frontend (object-history, backend/init-scripts-js) ----
+node_modules/
+dist/
+dist-ssr/
+build/
+.cache/
+*.local
+*.tsbuildinfo
+coverage/
+.nyc_output/
+
+# ---- Helm ----
+# `helm dependency update` vendors the agent subchart into charts/ and pins it
+# in Chart.lock. Both are build output; the dependency's source is in this repo.
+/deploy/helm/kseer/charts/
+/deploy/helm/kseer/Chart.lock
+*.tgz
+
+# ---- Logs & temp ----
+*.log
+logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.tmp
+*.temp
+*.bak

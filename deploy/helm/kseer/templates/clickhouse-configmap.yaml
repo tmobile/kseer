@@ -1,0 +1,39 @@
+{{- if .Values.clickhouse.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kseer.clickhouse.fullname" . }}-config
+  labels:
+    {{- include "kseer.labels" (dict "root" $ "component" "clickhouse" "values" .Values.clickhouse "kind" "deployment") | nindent 4 }}
+data:
+  # Dropped into /etc/clickhouse-server/config.d/, where it overlays the
+  # image's own config.xml.
+  kseer.xml: |
+    <clickhouse>
+        <logger>
+            <level>{{ .Values.clickhouse.settings.logLevel }}</level>
+            <!-- Log to the container's stdout/stderr so `kubectl logs` works. -->
+            <console>1</console>
+        </logger>
+    </clickhouse>
+  # Dropped into /etc/clickhouse-server/users.d/. Only holds settings — the user
+  # and password come from environment variables sourced from a Secret, so no
+  # credentials are ever written into a ConfigMap.
+  #
+  # Nothing here touches the `default` user: when CLICKHOUSE_USER is set to
+  # anything else, the image's entrypoint replaces the built-in passwordless
+  # `default` user with it, so there is no anonymous account left to lock down.
+  kseer-profiles.xml: |
+    <clickhouse>
+        <profiles>
+            <default>
+                {{/*
+                  int64, or Helm's YAML round-trip turns 4000000000 into the
+                  float 4e+09, which ClickHouse refuses to parse as a setting.
+                */}}
+                <max_memory_usage>{{ int64 .Values.clickhouse.settings.maxMemoryUsage }}</max_memory_usage>
+                <max_threads>{{ int .Values.clickhouse.settings.maxThreads }}</max_threads>
+            </default>
+        </profiles>
+    </clickhouse>
+{{- end }}

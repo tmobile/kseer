@@ -1,0 +1,10 @@
+# Generated during tests
+kubeconfigs/
+agent-test-config.yaml
+workload-generator.sh
+*.log
+*.pid
+
+# Test artifacts
+test-results/
+coverage/

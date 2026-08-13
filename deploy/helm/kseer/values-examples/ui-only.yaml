@@ -1,0 +1,34 @@
+# UI alone, pointed at a ClickHouse that already has data in it.
+#
+# Useful when the agents run elsewhere, or when you want the UI in a cluster
+# that watches nothing itself.
+#
+#   helm install kseer-ui ./deploy/helm/kseer -n kseer --create-namespace \
+#     -f ./deploy/helm/kseer/values-examples/ui-only.yaml
+
+clickhouse:
+  enabled: false
+schema:
+  enabled: false
+agent:
+  enabled: false
+
+ui:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: registry.example.com/kseer/kseer-object-history
+    tag: ""
+  clickhouse:
+    url: https://clickhouse.example.com:8443
+    database: kseer
+    table: kubernetes_events
+    sslVerify: true
+  ingress:
+    enabled: true
+    className: nginx
+    host: kseer.example.com
+    tls:
+      - secretName: kseer-ui-tls
+        hosts:
+          - kseer.example.com

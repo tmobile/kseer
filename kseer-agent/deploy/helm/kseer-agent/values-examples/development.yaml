@@ -1,0 +1,42 @@
+# Development configuration example for in-cluster deployment
+
+mode: in-cluster
+
+image:
+  repository: registry.example.com/kseer/kseer-agent
+  tag: "latest"
+  pullPolicy: Always
+
+cluster:
+  name: "dev-cluster"
+  # Watch all namespaces
+  namespaces: []
+  # Watch all resources
+  resources: []
+
+outputs:
+  clickhouse:
+    enabled: false
+  kafka:
+    enabled: false
+  # Enable stdout for debugging
+  stdout:
+    enabled: true
+    pretty: true
+
+buffer:
+  size: 10000
+  flushInterval: "5s"
+  retryInterval: "30s"
+  batchSize: 1000
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+logging:
+  level: debug

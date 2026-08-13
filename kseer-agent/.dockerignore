@@ -1,0 +1,70 @@
+# Don't ship version control history into the build context.
+.git
+.gitignore
+.gitlab-ci.yml
+.dockerignore
+
+# Documentation
+*.md
+LICENSE
+
+# IDE/editor cruft
+.idea/
+.vscode/
+.cursor/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local binaries from `make build`
+/agent
+/kseer-agent
+/kseer-agent-*
+*.exe
+
+# Test outputs
+*.test
+*.out
+coverage.html
+coverage.out
+
+# Build artifacts
+build/
+dist/
+
+# Helm chart and deploy configs aren't needed by the agent build
+deploy/
+
+# Test scripts and fixtures aren't needed by the agent build
+test/
+
+# Docker files (not needed by the build itself)
+docker-compose*.yaml
+docker-compose*.yml
+
+# Tooling configs
+Makefile
+RELEASING.md
+
+# Go workspace + vendor
+go.work
+go.work.sum
+vendor/
+
+# Tmp files
+*.tmp
+*.bak
+*.log
+
+# Secrets / env files (defense in depth)
+.env
+.env.local
+.vault-role-id*
+.vault-secret-id*
+
+# Helm packages
+*.tgz

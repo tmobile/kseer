@@ -1,0 +1,56 @@
+# Binaries (anchored to repo root so we don't ignore directories named the
+# same thing — e.g. deploy/helm/kseer-agent/, which is a real chart dir).
+/agent
+/kseer-agent
+/kseer-agent-*
+*.exe
+
+# Test and coverage files
+*.test
+*.out
+coverage.html
+coverage.out
+
+# IDE and editor files
+.idea/
+.vscode/
+.cursor/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Configuration files (optional, uncomment if needed)
+# config.yaml
+# .kseer-agent.yaml
+
+# Temporary files
+*.tmp
+*.bak
+
+# Log files
+*.log
+
+# Go workspace files
+go.work
+go.work.sum
+
+# Vendor directory (if using vendoring)
+vendor/
+
+# Build directories
+dist/
+build/
+
+# Secrets
+.vault-role-id
+.vault-secret-id
+.vault-role-id-internal
+.vault-secret-id-internal
+
+# Environment files
+.env
+.env.local

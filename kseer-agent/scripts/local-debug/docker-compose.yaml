@@ -1,0 +1,32 @@
+# Local ClickHouse for kseer-agent debugging.
+# Native protocol on 9000 (what the agent uses), HTTP UI on 8123.
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8.16.34
+    container_name: kseer-debug-clickhouse
+    ports:
+      # Host port is configurable to avoid local conflicts (e.g. a VPN/proxy on
+      # 9000). The container always listens on 9000/8123 internally; only the
+      # host-side port changes. run-local.sh keeps CH_PORT in the agent config
+      # in sync with the published native port.
+      - "${CH_PORT:-9100}:9000"      # native protocol (agent connects here)
+      - "${CH_HTTP_PORT:-8123}:8123" # HTTP (ad-hoc queries / play UI)
+    environment:
+      CLICKHOUSE_DB: kseer
+      # Allow the default user to connect with no password from anywhere on the
+      # local bridge network. This is a throwaway debug instance only.
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - kseer-debug-ch-data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  kseer-debug-ch-data:

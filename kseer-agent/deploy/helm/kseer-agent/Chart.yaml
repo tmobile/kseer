@@ -1,0 +1,15 @@
+apiVersion: v2
+name: kseer-agent
+description: Kubernetes object watcher agent that streams changes to configured outputs
+type: application
+version: 0.3.0
+appVersion: "0.0.34"
+keywords:
+  - kubernetes
+  - monitoring
+  - events
+  - watcher
+home: https://github.com/kseer/kseer-agent
+maintainers:
+  - name: Kseer Team
+
